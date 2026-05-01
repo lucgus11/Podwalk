@@ -27,6 +27,7 @@ export interface Walk {
 
 export interface WalkFormData {
   city: string;
+  country: string;
   duration: number;
   distance: number;
   theme: string;
