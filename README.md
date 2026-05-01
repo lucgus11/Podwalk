@@ -185,26 +185,9 @@ La balade est générée **une fois en Wi-Fi** puis stockée entièrement :
 
 ---
 
-## 🤝 Contribution
-
-Les PR sont les bienvenues ! Pour les changements majeurs, ouvrez d'abord une issue.
-
-```bash
-# Créer une branche feature
-git checkout -b feature/ma-nouvelle-fonctionnalite
-
-# Committer vos changements
-git commit -m "feat: ajout de ma fonctionnalité"
-
-# Pusher
-git push origin feature/ma-nouvelle-fonctionnalite
-```
-
----
-
 ## 📄 Licence
 
-MIT — Voir [LICENSE](LICENSE) pour plus de détails.
+CC 4.0 — Voir [LICENSE](LICENSE) pour plus de détails.
 
 ---
 
