@@ -15,65 +15,167 @@ const THEME_PROMPTS: Record<string, string> = {
   'Légendes & Mystères': 'ghost stories, myths, esoteric history, mysterious disappearances, cursed places, supernatural legends, folklore',
 };
 
+interface NominatimResult {
+  lat: string;
+  lon: string;
+  display_name: string;
+  importance: number;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function geocodePOI(
+  poiName: string,
+  city: string,
+  country: string,
+  fallbackLat: number,
+  fallbackLng: number
+): Promise<{ lat: number; lng: number; verified: boolean }> {
+  const queries = [
+    `${poiName}, ${city}, ${country}`,
+    `${poiName}, ${city}`,
+    `${poiName}, ${country}`,
+  ];
+
+  for (const q of queries) {
+    try {
+      const url =
+        `https://nominatim.openstreetmap.org/search` +
+        `?q=${encodeURIComponent(q)}&format=json&limit=3&addressdetails=0`;
+
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Podwalk/1.0 (contact@podwalk.app)',
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!res.ok) { await sleep(1100); continue; }
+
+      const results: NominatimResult[] = await res.json();
+      if (results.length === 0) { await sleep(1100); continue; }
+
+      const best = results.reduce((a, b) =>
+        (a.importance ?? 0) >= (b.importance ?? 0) ? a : b
+      );
+
+      const lat = parseFloat(best.lat);
+      const lng = parseFloat(best.lon);
+
+      if (fallbackLat !== 0 && fallbackLng !== 0) {
+        const d = haversineKm(lat, lng, fallbackLat, fallbackLng);
+        if (d > 50) { await sleep(1100); continue; }
+      }
+
+      return { lat, lng, verified: true };
+    } catch {
+      // network error or timeout
+    }
+    await sleep(1100);
+  }
+
+  return { lat: fallbackLat, lng: fallbackLng, verified: false };
+}
+
+async function geocodeCity(city: string, country: string) {
+  try {
+    const q = country ? `${city}, ${country}` : city;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Podwalk/1.0 (contact@podwalk.app)' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const results: NominatimResult[] = await res.json();
+    if (results.length === 0) return null;
+    return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { city, duration, distance, theme, language } = body;
+    const { city, country = '', duration, distance, theme, language } = body;
 
     if (!city || !theme) {
       return NextResponse.json({ error: 'Paramètres manquants' }, { status: 400 });
     }
 
-    const numPOIs = Math.max(3, Math.min(8, Math.floor(duration / 12)));
+    const location = country ? `${city}, ${country}` : city;
+    // More POIs: ~1 per 7 min, min 4, max 12
+    const numPOIs = Math.max(4, Math.min(12, Math.round(duration / 7)));
     const themeContext = THEME_PROMPTS[theme] || theme;
-    const langInstruction = language !== 'fr'
-      ? `Write ALL narrations and ALL text content in ${language}.`
-      : 'Écris toutes les narrations en français.';
+    const langInstruction =
+      language !== 'fr'
+        ? `Write ALL narrations and ALL text content in ${language}.`
+        : 'Écris toutes les narrations en français.';
 
-    const systemPrompt = `You are an expert documentary narrator and urban historian. You create immersive, captivating audio walking tour scripts. Your style is like a BBC or National Geographic documentary — dramatic, factual, emotionally engaging. You use vivid imagery, surprising facts, and storytelling techniques.
+    const systemPrompt = `You are an expert documentary narrator and urban historian. You create immersive, captivating audio walking tour scripts in BBC/National Geographic style.
 
 ${langInstruction}
 
-CRITICAL: You must return ONLY valid JSON, no markdown, no explanations, just the JSON object.`;
+CRITICAL RULES:
+1. Return ONLY valid JSON — no markdown fences, no explanations.
+2. Every place MUST be a real, named, publicly accessible location in ${location}.
+3. For GPS coordinates, provide your best estimate — they will be verified by OSM Nominatim. Accuracy matters.
+4. The walking route must be geographically coherent: consecutive POIs should be walkable from each other.`;
 
-    const userPrompt = `Create an immersive audio walking tour for ${city} with the theme: "${theme}" (${themeContext}).
+    const userPrompt = `Create an immersive audio walking tour for "${location}" with the theme: "${theme}" (${themeContext}).
 
 Parameters:
-- Duration: ${duration} minutes
-- Distance: ${distance} km
-- Number of POIs: ${numPOIs}
-- Theme focus: ${themeContext}
+- Duration: ${duration} minutes total walk
+- Distance: ~${distance} km
+- Number of POIs: exactly ${numPOIs}
+- Language: ${language}
 
-Return a JSON object with this EXACT structure:
+Return this EXACT JSON structure:
 {
   "city": "${city}",
+  "country": "${country}",
   "theme": "${theme}",
   "duration": ${duration},
   "distance": ${distance},
-  "centerLat": <float: city center latitude>,
-  "centerLng": <float: city center longitude>,
+  "centerLat": <float: real latitude of ${city} city centre>,
+  "centerLng": <float: real longitude of ${city} city centre>,
   "pois": [
     {
       "id": "poi_1",
-      "name": "<name of the real place>",
-      "lat": <float: exact real latitude>,
-      "lng": <float: exact real longitude>,
-      "radius": <int: trigger radius in meters, 30-60>,
+      "name": "<exact official name of the real place in its local language>",
+      "lat": <float: your best GPS estimate for this specific place>,
+      "lng": <float: your best GPS estimate for this specific place>,
+      "radius": <int: geofence trigger in meters, 25-50>,
       "order": 1,
-      "category": "<sub-category>",
+      "category": "<specific sub-category, e.g. 'Église gothique', 'Place médiévale'>",
       "completed": false,
       "triggered": false,
-      "narration": "<300-400 word immersive narration in documentary style. Start with an atmospheric hook. Include real historical facts, sensory details, dramatic anecdotes. Use present tense for immediacy. End with a transition to the next point.>"
+      "narration": "<immersive 300-400 word narration. Open with a sensory hook placing the listener HERE. Weave in verified historical facts, a surprising anecdote, vivid present-tense imagery. Close with a natural transition toward the next stop.>"
     }
   ]
 }
 
-IMPORTANT:
-- Use REAL, EXISTING places with ACCURATE GPS coordinates for ${city}
-- Make the walking route logical and connected (not jumping across the city)
-- Each narration should be 300-400 words, captivating, and factually accurate
-- The route should cover approximately ${distance} km and take ${duration} minutes
-- Start from a recognizable landmark and create a coherent route`;
+ROUTE DESIGN RULES:
+- Start at the most iconic or accessible landmark
+- Space POIs ~${Math.round((distance * 1000) / numPOIs)}m apart on average
+- Follow real streets — no shortcuts through private property or waterways
+- Cover ${distance} km in a geographically coherent route
+- ${numPOIs} distinct, real, named places with their correct local names`;
 
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
@@ -81,40 +183,65 @@ IMPORTANT:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.7,
-      max_tokens: 8000,
+      temperature: 0.65,
+      max_tokens: 12000,
       response_format: { type: 'json_object' },
     });
 
     const content = completion.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('Réponse vide de l\'IA');
-    }
+    if (!content) throw new Error("Réponse vide de l'IA");
 
     const walkData = JSON.parse(content);
 
-    // Validate structure
     if (!walkData.pois || !Array.isArray(walkData.pois) || walkData.pois.length === 0) {
-      throw new Error('Structure de données invalide');
+      throw new Error('Structure de données invalide retournée par le modèle');
     }
 
-    // Ensure all POIs have required fields
-    walkData.pois = walkData.pois.map((poi: Record<string, unknown>, index: number) => ({
-      ...poi,
-      id: poi.id || `poi_${index + 1}`,
-      order: poi.order || index + 1,
-      completed: false,
-      triggered: false,
-      radius: poi.radius || 40,
-    }));
+    // ── 1. Geocode city center ────────────────────────────────
+    const cityGeo = await geocodeCity(city, country);
+    if (cityGeo) {
+      walkData.centerLat = cityGeo.lat;
+      walkData.centerLng = cityGeo.lng;
+    }
+    await sleep(1100);
+
+    // ── 2. Geocode each POI via Nominatim ────────────────────
+    const geocodedPOIs = [];
+    for (let i = 0; i < walkData.pois.length; i++) {
+      const poi = walkData.pois[i] as Record<string, unknown>;
+      const fallbackLat = typeof poi.lat === 'number' ? poi.lat : walkData.centerLat;
+      const fallbackLng = typeof poi.lng === 'number' ? poi.lng : walkData.centerLng;
+
+      const geo = await geocodePOI(
+        String(poi.name || ''),
+        city,
+        country,
+        fallbackLat,
+        fallbackLng
+      );
+
+      geocodedPOIs.push({
+        ...poi,
+        id: poi.id || `poi_${i + 1}`,
+        order: typeof poi.order === 'number' ? poi.order : i + 1,
+        lat: geo.lat,
+        lng: geo.lng,
+        geocoded: geo.verified,
+        completed: false,
+        triggered: false,
+        radius: typeof poi.radius === 'number' ? poi.radius : 40,
+      });
+
+      if (i < walkData.pois.length - 1) await sleep(300);
+    }
+
+    walkData.pois = geocodedPOIs;
+    walkData.country = country;
 
     return NextResponse.json(walkData);
   } catch (error: unknown) {
     console.error('[Podwalk API] Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue';
-    return NextResponse.json(
-      { error: `Échec de la génération: ${errorMessage}` },
-      { status: 500 }
-    );
+    const msg = error instanceof Error ? error.message : 'Erreur inconnue';
+    return NextResponse.json({ error: `Échec de la génération: ${msg}` }, { status: 500 });
   }
 }
