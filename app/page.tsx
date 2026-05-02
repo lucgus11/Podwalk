@@ -18,10 +18,13 @@ export default function HomePage() {
   const handleGenerate = async (formData: WalkFormData) => {
     setIsGenerating(true);
     setError('');
-    setProgress('Analyse de la ville…');
+    const locationLabel = formData.country
+      ? `${formData.city}, ${formData.country}`
+      : formData.city;
+    setProgress(`Analyse de ${locationLabel}…`);
 
     try {
-      setProgress('Identification des points d\'intérêt…');
+      setProgress(`Identification des points d'intérêt à ${formData.city}…`);
 
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -148,15 +151,15 @@ export default function HomePage() {
 }
 
 function GeneratingScreen({ progress }: { progress: string }) {
-  const steps = [
-    'Analyse de la ville…',
-    'Identification des points d\'intérêt…',
-    'Rédaction des narrations immersives…',
-    'Sauvegarde de votre balade…',
+  const STEP_LABELS = [
+    'Analyse de la ville',
+    "Identification des points d'intérêt",
+    'Rédaction des narrations',
+    'Sauvegarde de votre balade',
     'Prêt !',
   ];
 
-  const currentStep = steps.indexOf(progress);
+  const currentStep = STEP_LABELS.findIndex(s => progress.startsWith(s.split(' ')[0]));
 
   return (
     <div className="glass rounded-2xl p-8 text-center">
@@ -177,7 +180,7 @@ function GeneratingScreen({ progress }: { progress: string }) {
 
       {/* Progress steps */}
       <div className="space-y-2 text-left">
-        {steps.map((step, i) => (
+        {STEP_LABELS.map((step, i) => (
           <div key={step} className="flex items-center gap-3">
             <div className={`w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
               i < currentStep
@@ -195,7 +198,7 @@ function GeneratingScreen({ progress }: { progress: string }) {
             <span className={`text-xs transition-all duration-500 ${
               i === currentStep ? 'text-cream' : i < currentStep ? 'text-gold' : 'text-muted'
             }`}>
-              {step.replace('…', '')}
+              {step}
             </span>
           </div>
         ))}
