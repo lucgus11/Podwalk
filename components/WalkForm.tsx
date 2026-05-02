@@ -34,6 +34,7 @@ interface Props {
 
 export default function WalkForm({ onSubmit, error }: Props) {
   const [city, setCity] = useState('');
+  const [country, setCountry] = useState('');
   const [duration, setDuration] = useState(45);
   const [distance, setDistance] = useState(3);
   const [theme, setTheme] = useState<Theme>('Histoire');
