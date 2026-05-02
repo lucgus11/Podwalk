@@ -14,6 +14,7 @@ export interface POI {
 export interface Walk {
   id: string;
   city: string;
+  country: string;
   theme: string;
   duration: number; // minutes
   distance: number; // km
