@@ -119,8 +119,8 @@ export async function POST(request: NextRequest) {
     }
 
     const location = country ? `${city}, ${country}` : city;
-    // More POIs: ~1 per 7 min, min 4, max 12
-    const numPOIs = Math.max(4, Math.min(12, Math.round(duration / 7)));
+    // ~1 POI per 10 min, min 3, max 8 (stays within Groq free tier token limit)
+    const numPOIs = Math.max(3, Math.min(8, Math.round(duration / 10)));
     const themeContext = THEME_PROMPTS[theme] || theme;
     const langInstruction =
       language !== 'fr'
@@ -165,7 +165,7 @@ Return this EXACT JSON structure:
       "category": "<specific sub-category, e.g. 'Église gothique', 'Place médiévale'>",
       "completed": false,
       "triggered": false,
-      "narration": "<immersive 300-400 word narration. Open with a sensory hook placing the listener HERE. Weave in verified historical facts, a surprising anecdote, vivid present-tense imagery. Close with a natural transition toward the next stop.>"
+      "narration": "<150-200 word immersive narration. Sensory hook, one key historical fact, one surprising anecdote, present tense. End with a transition to the next stop.>"
     }
   ]
 }
@@ -184,7 +184,7 @@ ROUTE DESIGN RULES:
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.65,
-      max_tokens: 12000,
+      max_tokens: 7000,
       response_format: { type: 'json_object' },
     });
 
