@@ -47,7 +47,7 @@ export default function WalkForm({ onSubmit, error }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!city.trim()) return;
-    onSubmit({ city: city.trim(), duration, distance, theme, language });
+    onSubmit({ city: city.trim(), country: country.trim(), duration, distance, theme, language });
   };
 
   return (
